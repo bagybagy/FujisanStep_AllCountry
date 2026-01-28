@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="winter">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>富士登山階段カウンター</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- DaisyUI -->
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.6.0/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <!-- Google Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;700&family=Zen+Maru+Gothic:wght@400;700&display=swap"
+        rel="stylesheet">
+    <!-- Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+    <!-- Supabase -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            background: linear-gradient(135deg, #a8c0ff 0%, #3f2b96 100%);
+            min-height: 100vh;
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .number-font {
+            font-family: 'Outfit', sans-serif;
+        }
+
+        /* Vertical Climbing Route */
+        #climb-route {
+            background-image: url('img/fuji.png');
+            background-size: contain;
+            background-position: bottom center;
+            background-repeat: no-repeat;
+            background-color: #87CEEB;
+            /* Sky blue fallback */
+            aspect-ratio: 1 / 1.2;
+            /* Adjust based on image ratio */
+        }
+
+        .station-marker {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            border-top: 2px dashed rgba(255, 255, 255, 0.4);
+            padding: 2px 0 0 8px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.95);
+            font-weight: bold;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+        }
+
+        /* Climber Avatar Styles */
+        .climber-avatar {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            font-size: 14px;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+            border: 2px solid white;
+            transition: bottom 0.8s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s ease;
+            cursor: pointer;
+            z-index: 10;
+        }
+
+        .climber-avatar:hover {
+            transform: translateX(-50%) scale(1.3);
+            z-index: 20;
+        }
+
+        .climber-avatar.self {
+            width: 42px;
+            height: 42px;
+            font-size: 18px;
+            border: 3px solid #FFD700;
+            box-shadow: 0 0 20px rgba(255, 215, 0, 0.7), 0 3px 10px rgba(0, 0, 0, 0.4);
+            z-index: 15;
+        }
+
+        .climber-avatar.self::after {
+            content: '★';
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            font-size: 16px;
+            color: #FFD700;
+            text-shadow: 0 0 5px rgba(255, 215, 0, 0.8);
+        }
+
+        /* Name Label */
+        .climber-name {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 100%;
+            margin-top: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            color: rgba(0, 0, 0, 0.8);
+            background: rgba(255, 255, 255, 0.9);
+            padding: 2px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            pointer-events: none;
+            text-shadow: none;
+        }
+    </style>
+</head>
+
+<body class="p-4 flex flex-col items-center justify-center text-slate-800">
+
+    <div class="glass-panel w-full max-w-md p-6 space-y-6">
+        <!-- Header -->
+        <header class="text-center">
+            <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">
+                🗻 富士登山カウンター
+            </h1>
+            <p class="text-xs text-gray-500 mt-1">目指せ山頂 3,776m</p>
+            <div id="online-counter" class="hidden text-xs text-green-600 font-bold mt-2 animate-pulse">
+                ● <span id="online-count">0</span>人が登山中
+            </div>
+        </header>
+
+        <!-- Status Card -->
+        <div class="bg-white/50 rounded-xl p-4 text-center shadow-sm">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">現在の標高</p>
+                    <p class="text-3xl font-bold number-font text-blue-600" id="current-elevation">0<span
+                            class="text-sm text-gray-400 font-normal ml-1">m</span></p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">累計段数</p>
+                    <p class="text-2xl font-bold number-font text-slate-700" id="total-steps">0<span
+                            class="text-sm text-gray-400 font-normal ml-1">段</span></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Climbing Route (Vertical) -->
+        <div class="space-y-2">
+            <div class="flex justify-between text-xs font-bold text-gray-600">
+                <span id="current-station">スタート地点</span>
+                <span>山頂まで <span id="remaining-elevation" class="number-font">3776</span>m</span>
+            </div>
+
+            <!-- Vertical Mountain Route -->
+            <div id="climb-route" class="relative w-full h-[350px] rounded-xl overflow-hidden shadow-lg">
+                <!-- Station Markers (injected by JS) -->
+                <div id="station-markers"></div>
+
+                <!-- Climbers Visualizer -->
+                <div id="climbers-visualizer" class="absolute inset-0"></div>
+            </div>
+        </div>
+
+        <!-- Notification Area (Moved to top-layer toast) -->
+        <div id="notification-dummy" class="h-0"></div>
+
+        <!-- History -->
+        <div class="space-y-2">
+            <h3 class="text-sm font-bold text-gray-600 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24"
+                    stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                直近の履歴
+            </h3>
+            <ul id="history-list" class="text-sm space-y-2 max-h-40 overflow-y-auto pr-1 scrollbar-thin">
+                <!-- History items will be injected here -->
+                <li class="text-gray-400 text-center text-xs py-2">まだ記録はありません</li>
+            </ul>
+        </div>
+
+        <!-- Debug/Reset -->
+        <div class="pt-4 border-t border-gray-200/50 flex justify-between items-center">
+            <button id="ranking-btn" class="btn btn-xs btn-ghost text-amber-600 hover:text-amber-700">🏆 ランキング</button>
+            <button id="reset-btn" class="btn btn-xs btn-ghost text-red-400 hover:text-red-500">データリセット</button>
+        </div>
+    </div>
+
+    <!-- Ranking Modal -->
+    <dialog id="ranking_modal" class="modal modal-bottom sm:modal-middle">
+        <div class="modal-box glass-panel max-h-[80vh]">
+            <h3 class="font-bold text-lg flex items-center gap-2">🏆 ランキング</h3>
+            <!-- Ranking Tabs -->
+            <div class="tabs tabs-boxed bg-white/50 mt-2">
+                <button id="ranking-tab-all" class="ranking-tab tab tab-active"
+                    onclick="switchRankingMode('all')">全体</button>
+                <button id="ranking-tab-school" class="ranking-tab tab"
+                    onclick="switchRankingMode('school')">校舎内</button>
+                <button id="ranking-tab-team" class="ranking-tab tab" onclick="switchRankingMode('team')">校舎対抗</button>
+            </div>
+            <div class="py-4 max-h-96 overflow-y-auto">
+                <ol id="ranking-list" class="space-y-2 text-sm">
+                    <li class="text-gray-400 text-center text-xs py-2">読み込み中...</li>
+                </ol>
+            </div>
+            <div class="modal-action">
+                <form method="dialog">
+                    <button class="btn btn-ghost">閉じる</button>
+                </form>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- Admin Modal -->
+    <dialog id="admin_modal" class="modal modal-bottom sm:modal-middle">
+        <div class="modal-box glass-panel max-h-[90vh]">
+            <h3 class="font-bold text-lg flex items-center gap-2">🔧 管理者パネル</h3>
+            <div class="py-4 space-y-4">
+                <!-- User List -->
+                <div>
+                    <h4 class="font-bold text-sm mb-2">登録ユーザー一覧</h4>
+                    <div class="max-h-48 overflow-y-auto border rounded p-2 bg-white/50">
+                        <ul id="admin-user-list" class="space-y-1 text-sm">
+                            <li class="text-gray-400 text-center text-xs py-2">読み込み中...</li>
+                        </ul>
+                    </div>
+                </div>
+                <!-- Add Steps -->
+                <div class="border-t pt-4">
+                    <h4 class="font-bold text-sm mb-2">段数付与（救済措置）</h4>
+                    <div class="flex gap-2">
+                        <input type="text" id="admin-target-user" placeholder="ユーザー名"
+                            class="input input-bordered input-sm flex-1" />
+                        <input type="number" id="admin-add-steps" placeholder="段数"
+                            class="input input-bordered input-sm w-24" />
+                        <button id="admin-add-steps-btn" class="btn btn-sm btn-primary">付与</button>
+                    </div>
+                </div>
+                <!-- Reset All -->
+                <div class="border-t pt-4">
+                    <h4 class="font-bold text-sm mb-2 text-red-600">危険な操作</h4>
+                    <button id="admin-reset-all-btn" class="btn btn-sm btn-error">全ユーザーデータをリセット</button>
+                </div>
+            </div>
+            <div class="modal-action">
+                <form method="dialog">
+                    <button class="btn btn-ghost">閉じる</button>
+                </form>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- User Name Modal -->
+    <dialog id="username_modal" class="modal modal-bottom sm:modal-middle">
+        <div class="modal-box glass-panel">
+            <h3 class="font-bold text-lg">登山者登録</h3>
+            <p class="py-4">校舎とニックネームを入力して、みんなと一緒に登ろう！</p>
+            <div class="form-control w-full space-y-3">
+                <!-- School Selection -->
+                <div>
+                    <label class="label">
+                        <span class="label-text font-bold">校舎を選択</span>
+                    </label>
+                    <select id="school-select" class="select select-bordered w-full">
+                        <option value="">校舎を選んでください</option>
+                        <!-- Options will be populated by JS -->
+                    </select>
+                </div>
+                <!-- Username Input -->
+                <div>
+                    <label class="label">
+                        <span class="label-text font-bold">ニックネーム</span>
+                    </label>
+                    <input type="text" id="username-input" placeholder="例: ヤマノボラー"
+                        class="input input-bordered w-full" />
+                </div>
+            </div>
+            <div class="modal-action flex justify-between">
+                <button id="username-skip" class="btn btn-ghost">後で登録</button>
+                <button id="username-submit" class="btn btn-primary px-8">出発！</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- Script -->
+    <div id="notification-area" class="toast toast-top toast-center z-[99999]"></div>
+    <script src="config/schools.js"></script>
+    <script src="app.js"></script>
+    <script>
+        // Populate school select options from schools.js
+        document.addEventListener('DOMContentLoaded', () => {
+            const schoolSelect = document.getElementById('school-select');
+            if (schoolSelect && window.SCHOOLS) {
+                window.SCHOOLS.forEach(school => {
+                    const option = document.createElement('option');
+                    option.value = school.id;
+                    option.textContent = school.name;
+                    schoolSelect.appendChild(option);
+                });
+            }
+        });
+    </script>
+</body>
+
+</html>
