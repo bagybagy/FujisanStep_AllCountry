@@ -779,7 +779,7 @@ async function loadAdminUserList() {
             return `
                 <li class="flex justify-between items-center p-1 bg-white/40 rounded text-xs">
                     <span>${climber.username} (${elevation}m, ${climber.total_steps}段)</span>
-                    <button class="btn btn-xs btn-error" onclick="deleteClimber('${climber.username}')">削除</button>
+                    <button class="btn btn-xs btn-error" onclick="deleteClimber('${climber.username}', '${climber.school_id}')">削除</button>
                 </li>
             `;
         }).join('');
@@ -789,7 +789,7 @@ async function loadAdminUserList() {
     }
 }
 
-async function deleteClimber(username) {
+async function deleteClimber(username, schoolId) {
     if (!confirm(`${username} を削除しますか？`)) return;
 
     if (!supabaseClient) {
@@ -798,14 +798,21 @@ async function deleteClimber(username) {
     }
 
     try {
-        const { error } = await supabaseClient
+        const { data, error } = await supabaseClient
             .from('climbers')
             .delete()
-            .eq('username', username);
+            .eq('username', username)
+            .eq('school_id', schoolId)
+            .select();
 
         if (error) {
             console.error('Delete error:', error);
             alert('削除に失敗しました: ' + error.message);
+            return;
+        }
+
+        if (!data || data.length === 0) {
+            alert('削除対象が見つかりませんでした。すでに削除されているか、権限がありません。');
             return;
         }
 
