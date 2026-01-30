@@ -400,13 +400,23 @@ function renderStationMarkers() {
 }
 
 /**
- * Render climbers from database table data
- * Optimized for large user counts: shows top N climbers + always self
+ * Generate consistent random value (-1.0 to 1.0) from string seed
  */
-const MAX_AVATAR_DISPLAY = 50; // Max avatars to show (excluding self if not in top N)
+function getPseudoRandom(seed) {
+    if (!seed) return 0;
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) {
+        hash = ((hash << 5) - hash) + seed.charCodeAt(i);
+        hash |= 0; // Convert to 32bit integer
+    }
+    const normalized = (Math.abs(hash) % 10000) / 10000; // 0.0 to 1.0
+    return (normalized * 2) - 1; // -1.0 to 1.0
+}
 
 function renderVisualizerFromTable(climbersData) {
     elClimbersVisualizer.innerHTML = '';
+
+    const MAX_AVATAR_DISPLAY = 50; // Max avatars to show
 
     // Optimization: Limit to top N users + ensure self is always included
     let displayData = climbersData.slice(0, MAX_AVATAR_DISPLAY);
@@ -422,14 +432,23 @@ function renderVisualizerFromTable(climbersData) {
     }
 
     displayData.forEach(climber => {
+        if (!climber.username) return;
+
         const elevation = (climber.total_steps * STEP_HEIGHT);
         const pct = Math.min(100, Math.max(0, (elevation / GOAL_ELEVATION) * 100));
         const isSelf = climber.username === state.username && climber.school_id === state.schoolId;
 
-        // Slope-following logic: drift and narrowing
-        const drift = Math.sin(pct * 0.15) * 40;
-        const narrowing = 1 - (pct / 100);
-        const leftPosition = 50 + (drift * narrowing);
+        // Mountain Distribution Logic
+        // Spread is wide at bottom (45%) and narrow at top (5%)
+        const maxSpread = 45; // Start: +/- 45% from center
+        const minSpread = 5;  // Top: +/- 5% from center
+        const currentSpread = maxSpread - ((pct / 100) * (maxSpread - minSpread));
+
+        // Use stable random offset based on username
+        const randomOffset = getPseudoRandom(climber.username);
+
+        // Calculate left position
+        const leftPosition = 50 + (randomOffset * currentSpread);
 
         const avatar = document.createElement('div');
         avatar.className = `climber-avatar tooltip ${isSelf ? 'self' : ''}`;
@@ -779,7 +798,7 @@ async function loadAdminUserList() {
             return `
                 <li class="flex justify-between items-center p-1 bg-white/40 rounded text-xs">
                     <span>${climber.username} (${elevation}m, ${climber.total_steps}段)</span>
-                    <button class="btn btn-xs btn-error" onclick="deleteClimber('${climber.username}')">削除</button>
+                    <button class="btn btn-xs btn-error" onclick="deleteClimber('${climber.username}', '${climber.school_id}')">削除</button>
                 </li>
             `;
         }).join('');
@@ -789,23 +808,48 @@ async function loadAdminUserList() {
     }
 }
 
-async function deleteClimber(username) {
+async function deleteClimber(username, schoolId) {
     if (!confirm(`${username} を削除しますか？`)) return;
 
-    if (!supabaseClient) {
+    // Check for Admin Secret Key
+    const adminKeyInput = document.getElementById('admin-secret-key');
+    const adminKey = adminKeyInput ? adminKeyInput.value.trim() : null;
+
+    let targetClient = supabaseClient;
+
+    // specific privilege check
+    if (adminKey) {
+        try {
+            // Create a temporary privileged client
+            targetClient = window.supabase.createClient(SUPABASE_URL, adminKey);
+        } catch (e) {
+            console.error('Failed to create privileged client', e);
+            alert('管理者キーが無効です');
+            return;
+        }
+    }
+
+    if (!targetClient) {
         alert('接続エラー');
         return;
     }
 
     try {
-        const { error } = await supabaseClient
+        const { data, error } = await targetClient
             .from('climbers')
             .delete()
-            .eq('username', username);
+            .eq('username', username)
+            .eq('school_id', schoolId)
+            .select();
 
         if (error) {
             console.error('Delete error:', error);
             alert('削除に失敗しました: ' + error.message);
+            return;
+        }
+
+        if (!data || data.length === 0) {
+            alert('削除対象が見つかりませんでした。すでに削除されているか、権限がありません。\n管理者キーを入力して再度お試しください。');
             return;
         }
 
@@ -868,7 +912,22 @@ async function resetAllClimbers() {
     if (!confirm('本当に全ユーザーデータを削除しますか？この操作は元に戻せません！')) return;
     if (!confirm('再度確認：すべてのユーザーの登山記録がリセットされます。続行しますか？')) return;
 
-    if (!supabaseClient) {
+    // Check for Admin Secret Key
+    const adminKeyInput = document.getElementById('admin-secret-key');
+    const adminKey = adminKeyInput ? adminKeyInput.value.trim() : null;
+
+    let targetClient = supabaseClient;
+
+    if (adminKey) {
+        try {
+            targetClient = window.supabase.createClient(SUPABASE_URL, adminKey);
+        } catch (e) {
+            alert('管理者キーが無効です');
+            return;
+        }
+    }
+
+    if (!targetClient) {
         alert('接続エラー');
         return;
     }
@@ -878,7 +937,7 @@ async function resetAllClimbers() {
         const newResetToken = Date.now().toString();
 
         // Update reset token in config table
-        const { error: tokenError } = await supabaseClient
+        const { error: tokenError } = await targetClient
             .from('config')
             .upsert({ key: 'reset_token', value: newResetToken }, { onConflict: 'key' });
 
@@ -888,7 +947,7 @@ async function resetAllClimbers() {
         }
 
         // Delete all rows (Supabase requires a filter, so we use 'total_steps >= 0')
-        const { error } = await supabaseClient
+        const { error } = await targetClient
             .from('climbers')
             .delete()
             .gte('total_steps', 0);

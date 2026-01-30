@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>富士登山階段カウンター</title>
+    <title>富士登山カウンター（全国版）</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- DaisyUI -->
@@ -133,7 +133,7 @@
         <!-- Header -->
         <header class="text-center">
             <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">
-                🗻 富士登山カウンター
+                🗻 富士登山カウンター（全国版）
             </h1>
             <p class="text-xs text-gray-500 mt-1">目指せ山頂 3,776m</p>
             <div id="online-counter" class="hidden text-xs text-green-600 font-bold mt-2 animate-pulse">
@@ -233,6 +233,14 @@
                 <!-- User List -->
                 <div>
                     <h4 class="font-bold text-sm mb-2">登録ユーザー一覧</h4>
+
+                    <!-- Admin Key Input -->
+                    <div class="mb-2">
+                        <input type="password" id="admin-secret-key" placeholder="管理者キー (Service Role Key)"
+                            class="input input-bordered input-xs w-full text-xs font-mono" />
+                        <p class="text-[10px] text-gray-400 mt-1">※削除権限がない場合はここに入力してください</p>
+                    </div>
+
                     <div class="max-h-48 overflow-y-auto border rounded p-2 bg-white/50">
                         <ul id="admin-user-list" class="space-y-1 text-sm">
                             <li class="text-gray-400 text-center text-xs py-2">読み込み中...</li>
