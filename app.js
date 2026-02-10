@@ -191,8 +191,8 @@ function addSteps(id, steps) {
 
     // 2. Once-per-day Check (Global - only 1 scan per day total)
     const todayStr = new Date().toLocaleDateString('ja-JP'); // e.g., '2026/1/27'
-    if (state.lastScanDate === todayStr) {
-        showNotification('本日はすでに記録済みです（翌日0時にリセット）', 'warning');
+    if (state.lastScanDate === todayStr && !adminBypassDailyLimit) {
+        showNotification('✅ 本日の登山は記録済みです！明日また階段を上って読み取ってください 🏔️', 'warning');
         return;
     }
 
@@ -752,6 +752,7 @@ const elAdminAddStepsBtn = document.getElementById('admin-add-steps-btn');
 const elAdminResetAllBtn = document.getElementById('admin-reset-all-btn');
 
 let isAdminMode = false;
+let adminBypassDailyLimit = false;
 
 function checkAdminMode() {
     const params = new URLSearchParams(window.location.search);
@@ -767,6 +768,18 @@ function checkAdminMode() {
             loadAdminUserList();
         });
         document.body.appendChild(adminBtn);
+
+        // Bypass toggle listener
+        const bypassToggle = document.getElementById('admin-bypass-daily');
+        if (bypassToggle) {
+            bypassToggle.addEventListener('change', (e) => {
+                adminBypassDailyLimit = e.target.checked;
+                showNotification(
+                    adminBypassDailyLimit ? '1日1回制限を解除しました（テストモード）' : '1日1回制限を有効にしました',
+                    adminBypassDailyLimit ? 'warning' : 'info'
+                );
+            });
+        }
     }
 }
 
