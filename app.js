@@ -191,8 +191,8 @@ function addSteps(id, steps) {
 
     // 2. Once-per-day Check (Global - only 1 scan per day total)
     const todayStr = new Date().toLocaleDateString('ja-JP'); // e.g., '2026/1/27'
-    if (state.lastScanDate === todayStr) {
-        showNotification('本日はすでに記録済みです（翌日0時にリセット）', 'warning');
+    if (state.lastScanDate === todayStr && dailyLimitEnabled) {
+        showNotification('✅ 本日の登山は記録済みです！明日また階段を上って読み取ってください 🏔️', 'warning');
         return;
     }
 
@@ -267,6 +267,9 @@ async function initSupabase() {
         console.error('Supabase client not initialized');
         return;
     }
+
+    // Fetch daily limit setting from server (affects all clients)
+    await fetchDailyLimitSetting();
 
     // Check reset token first (before syncing or processing URL params)
     const wasReset = await checkResetToken();
@@ -400,13 +403,23 @@ function renderStationMarkers() {
 }
 
 /**
- * Render climbers from database table data
- * Optimized for large user counts: shows top N climbers + always self
+ * Generate consistent random value (-1.0 to 1.0) from string seed
  */
-const MAX_AVATAR_DISPLAY = 50; // Max avatars to show (excluding self if not in top N)
+function getPseudoRandom(seed) {
+    if (!seed) return 0;
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) {
+        hash = ((hash << 5) - hash) + seed.charCodeAt(i);
+        hash |= 0; // Convert to 32bit integer
+    }
+    const normalized = (Math.abs(hash) % 10000) / 10000; // 0.0 to 1.0
+    return (normalized * 2) - 1; // -1.0 to 1.0
+}
 
 function renderVisualizerFromTable(climbersData) {
     elClimbersVisualizer.innerHTML = '';
+
+    const MAX_AVATAR_DISPLAY = 50; // Max avatars to show
 
     // Optimization: Limit to top N users + ensure self is always included
     let displayData = climbersData.slice(0, MAX_AVATAR_DISPLAY);
@@ -422,14 +435,23 @@ function renderVisualizerFromTable(climbersData) {
     }
 
     displayData.forEach(climber => {
+        if (!climber.username) return;
+
         const elevation = (climber.total_steps * STEP_HEIGHT);
         const pct = Math.min(100, Math.max(0, (elevation / GOAL_ELEVATION) * 100));
         const isSelf = climber.username === state.username && climber.school_id === state.schoolId;
 
-        // Slope-following logic: drift and narrowing
-        const drift = Math.sin(pct * 0.15) * 40;
-        const narrowing = 1 - (pct / 100);
-        const leftPosition = 50 + (drift * narrowing);
+        // Mountain Distribution Logic
+        // Spread is wide at bottom (45%) and narrow at top (5%)
+        const maxSpread = 45; // Start: +/- 45% from center
+        const minSpread = 5;  // Top: +/- 5% from center
+        const currentSpread = maxSpread - ((pct / 100) * (maxSpread - minSpread));
+
+        // Use stable random offset based on username
+        const randomOffset = getPseudoRandom(climber.username);
+
+        // Calculate left position
+        const leftPosition = 50 + (randomOffset * currentSpread);
 
         const avatar = document.createElement('div');
         avatar.className = `climber-avatar tooltip ${isSelf ? 'self' : ''}`;
@@ -733,6 +755,81 @@ const elAdminAddStepsBtn = document.getElementById('admin-add-steps-btn');
 const elAdminResetAllBtn = document.getElementById('admin-reset-all-btn');
 
 let isAdminMode = false;
+let dailyLimitEnabled = true; // Server-synced: true=通常(1日1回制限), false=デバッグ(制限なし)
+
+/**
+ * Fetch daily_limit_enabled setting from Supabase config table
+ * Called on every page load so all clients share the same setting
+ */
+async function fetchDailyLimitSetting() {
+    if (!supabaseClient) return;
+
+    try {
+        const { data, error } = await supabaseClient
+            .from('config')
+            .select('value')
+            .eq('key', 'daily_limit_enabled')
+            .single();
+
+        if (error) {
+            // Row doesn't exist yet → default to enabled (normal mode)
+            console.log('No daily_limit_enabled config found, defaulting to enabled');
+            return;
+        }
+
+        dailyLimitEnabled = data?.value !== 'false';
+    } catch (e) {
+        console.error('Fetch daily limit setting error:', e);
+    }
+}
+
+/**
+ * Toggle daily limit setting in Supabase config (Admin only)
+ * Affects ALL clients on next page load
+ */
+async function toggleDailyLimit(enabled) {
+    if (!supabaseClient) {
+        alert('接続エラー');
+        return false;
+    }
+
+    // Use admin key if provided (for RLS bypass)
+    const adminKeyInput = document.getElementById('admin-secret-key');
+    const adminKey = adminKeyInput ? adminKeyInput.value.trim() : null;
+    let targetClient = supabaseClient;
+
+    if (adminKey) {
+        try {
+            targetClient = window.supabase.createClient(SUPABASE_URL, adminKey);
+        } catch (e) {
+            alert('管理者キーが無効です');
+            return false;
+        }
+    }
+
+    try {
+        const { error } = await targetClient
+            .from('config')
+            .upsert({ key: 'daily_limit_enabled', value: enabled ? 'true' : 'false' }, { onConflict: 'key' });
+
+        if (error) {
+            console.error('Toggle daily limit error:', error);
+            alert('設定の保存に失敗しました: ' + error.message);
+            return false;
+        }
+
+        dailyLimitEnabled = enabled;
+        showNotification(
+            enabled ? '1日1回制限を有効にしました（通常モード）' : '1日1回制限を解除しました（デバッグモード）⚠️ 全ユーザーに反映されます',
+            enabled ? 'info' : 'warning'
+        );
+        return true;
+    } catch (e) {
+        console.error('Toggle daily limit exception:', e);
+        alert('設定変更中にエラーが発生しました');
+        return false;
+    }
+}
 
 function checkAdminMode() {
     const params = new URLSearchParams(window.location.search);
@@ -743,11 +840,31 @@ function checkAdminMode() {
         adminBtn.id = 'admin-open-btn';
         adminBtn.className = 'fixed bottom-4 right-4 btn btn-circle btn-warning shadow-lg z-50';
         adminBtn.textContent = '🔧';
-        adminBtn.addEventListener('click', () => {
+        adminBtn.addEventListener('click', async () => {
             elAdminModal.showModal();
             loadAdminUserList();
+
+            // Load current daily limit setting and reflect in toggle
+            await fetchDailyLimitSetting();
+            const bypassToggle = document.getElementById('admin-bypass-daily');
+            if (bypassToggle) {
+                bypassToggle.checked = !dailyLimitEnabled;
+            }
         });
         document.body.appendChild(adminBtn);
+
+        // Bypass toggle listener
+        const bypassToggle = document.getElementById('admin-bypass-daily');
+        if (bypassToggle) {
+            bypassToggle.addEventListener('change', async (e) => {
+                const newEnabled = !e.target.checked; // checked=解除=disabled
+                const success = await toggleDailyLimit(newEnabled);
+                if (!success) {
+                    // Revert toggle on failure
+                    e.target.checked = !e.target.checked;
+                }
+            });
+        }
     }
 }
 
@@ -779,7 +896,7 @@ async function loadAdminUserList() {
             return `
                 <li class="flex justify-between items-center p-1 bg-white/40 rounded text-xs">
                     <span>${climber.username} (${elevation}m, ${climber.total_steps}段)</span>
-                    <button class="btn btn-xs btn-error" onclick="deleteClimber('${climber.username}')">削除</button>
+                    <button class="btn btn-xs btn-error" onclick="deleteClimber('${climber.username}', '${climber.school_id}')">削除</button>
                 </li>
             `;
         }).join('');
@@ -789,23 +906,48 @@ async function loadAdminUserList() {
     }
 }
 
-async function deleteClimber(username) {
+async function deleteClimber(username, schoolId) {
     if (!confirm(`${username} を削除しますか？`)) return;
 
-    if (!supabaseClient) {
+    // Check for Admin Secret Key
+    const adminKeyInput = document.getElementById('admin-secret-key');
+    const adminKey = adminKeyInput ? adminKeyInput.value.trim() : null;
+
+    let targetClient = supabaseClient;
+
+    // specific privilege check
+    if (adminKey) {
+        try {
+            // Create a temporary privileged client
+            targetClient = window.supabase.createClient(SUPABASE_URL, adminKey);
+        } catch (e) {
+            console.error('Failed to create privileged client', e);
+            alert('管理者キーが無効です');
+            return;
+        }
+    }
+
+    if (!targetClient) {
         alert('接続エラー');
         return;
     }
 
     try {
-        const { error } = await supabaseClient
+        const { data, error } = await targetClient
             .from('climbers')
             .delete()
-            .eq('username', username);
+            .eq('username', username)
+            .eq('school_id', schoolId)
+            .select();
 
         if (error) {
             console.error('Delete error:', error);
             alert('削除に失敗しました: ' + error.message);
+            return;
+        }
+
+        if (!data || data.length === 0) {
+            alert('削除対象が見つかりませんでした。すでに削除されているか、権限がありません。\n管理者キーを入力して再度お試しください。');
             return;
         }
 
@@ -868,7 +1010,22 @@ async function resetAllClimbers() {
     if (!confirm('本当に全ユーザーデータを削除しますか？この操作は元に戻せません！')) return;
     if (!confirm('再度確認：すべてのユーザーの登山記録がリセットされます。続行しますか？')) return;
 
-    if (!supabaseClient) {
+    // Check for Admin Secret Key
+    const adminKeyInput = document.getElementById('admin-secret-key');
+    const adminKey = adminKeyInput ? adminKeyInput.value.trim() : null;
+
+    let targetClient = supabaseClient;
+
+    if (adminKey) {
+        try {
+            targetClient = window.supabase.createClient(SUPABASE_URL, adminKey);
+        } catch (e) {
+            alert('管理者キーが無効です');
+            return;
+        }
+    }
+
+    if (!targetClient) {
         alert('接続エラー');
         return;
     }
@@ -878,7 +1035,7 @@ async function resetAllClimbers() {
         const newResetToken = Date.now().toString();
 
         // Update reset token in config table
-        const { error: tokenError } = await supabaseClient
+        const { error: tokenError } = await targetClient
             .from('config')
             .upsert({ key: 'reset_token', value: newResetToken }, { onConflict: 'key' });
 
@@ -888,7 +1045,7 @@ async function resetAllClimbers() {
         }
 
         // Delete all rows (Supabase requires a filter, so we use 'total_steps >= 0')
-        const { error } = await supabaseClient
+        const { error } = await targetClient
             .from('climbers')
             .delete()
             .gte('total_steps', 0);
