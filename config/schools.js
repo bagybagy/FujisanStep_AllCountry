@@ -14,13 +14,13 @@
  */
 
 const SCHOOLS = [
-    { id: 'school1', name: '東京校' },
-    { id: 'school2', name: '大阪校' },
-    { id: 'school3', name: '神戸校' },
-    { id: 'school4', name: '福岡校' },
-    { id: 'school5', name: '横浜校' },
-    { id: 'school6', name: '名古屋校' },
-    { id: 'school7', name: '横浜校' },
+    { id: 'school1', name: '東京校(とうきょうこう)' },
+    { id: 'school2', name: '大阪校(おおさかこう)' },
+    { id: 'school3', name: '神戸校(こうべこう)' },
+    { id: 'school4', name: '福岡校(ふくおかこう)' },
+    { id: 'school5', name: '横浜校(よこはまこう)' },
+    { id: 'school6', name: '名古屋校(なごやこう)' },
+    { id: 'school7', name: '〇〇校' },
     // ↓ 16校目以降はここに追加
     // { id: 'school16', name: '校舎16' },
 ];
